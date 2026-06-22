@@ -16,6 +16,11 @@ export function Entries({ userEmail }: { userEmail: string }) {
   const [error, setError] = useState('');
 
   async function load() {
+    if (!supabase) {
+      setError('Supabase не настроен.');
+      return;
+    }
+
     const { data, error } = await supabase
       .from('entries')
       .select('id, title, created_at')
@@ -30,6 +35,10 @@ export function Entries({ userEmail }: { userEmail: string }) {
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
+    if (!supabase) {
+      setError('Supabase не настроен.');
+      return;
+    }
     if (!title.trim()) return;
     const { error } = await supabase.from('entries').insert({ title: title.trim() });
     if (error) setError(error.message);
@@ -40,6 +49,11 @@ export function Entries({ userEmail }: { userEmail: string }) {
   }
 
   async function remove(id: string) {
+    if (!supabase) {
+      setError('Supabase не настроен.');
+      return;
+    }
+
     const { error } = await supabase.from('entries').delete().eq('id', id);
     if (error) setError(error.message);
     else load();

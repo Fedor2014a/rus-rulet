@@ -1,8 +1,12 @@
 import { useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseConfigError } from '../lib/supabase';
 
 // Вход и регистрация по email + паролю. Это пример — Codex поможет улучшить (Google-вход и т.д.).
-export function Auth() {
+type AuthProps = {
+  onGuest: () => void;
+};
+
+export function Auth({ onGuest }: AuthProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
@@ -11,6 +15,11 @@ export function Auth() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!supabase) {
+      setMessage(supabaseConfigError);
+      return;
+    }
+
     setBusy(true);
     setMessage('');
     try {
@@ -29,7 +38,8 @@ export function Auth() {
   }
 
   return (
-    <section className="card">
+    <section className="auth-card">
+      <p className="auth-kicker">Boss run account</p>
       <h2>{mode === 'signin' ? 'Вход' : 'Регистрация'}</h2>
       <form onSubmit={handleSubmit} className="form">
         <input
@@ -57,6 +67,9 @@ export function Auth() {
         onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
       >
         {mode === 'signin' ? 'Нет аккаунта? Зарегистрируйся' : 'Уже есть аккаунт? Войти'}
+      </button>
+      <button className="guest-button" onClick={onGuest} type="button">
+        Войти как гость
       </button>
     </section>
   );
