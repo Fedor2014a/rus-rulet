@@ -3,7 +3,7 @@ import { supabase, supabaseConfigError } from '../lib/supabase';
 
 // Вход и регистрация по email + паролю. Это пример — Codex поможет улучшить (Google-вход и т.д.).
 type AuthProps = {
-  onGuest: () => void;
+  onGuest: () => Promise<void> | void;
 };
 
 export function Auth({ onGuest }: AuthProps) {
@@ -32,6 +32,18 @@ export function Auth({ onGuest }: AuthProps) {
       else if (mode === 'signup') setMessage('Готово! Проверь почту, если нужна подтверждалка.');
     } catch {
       setMessage('Что-то пошло не так. Попробуй ещё раз.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGuest() {
+    setBusy(true);
+    setMessage('');
+    try {
+      await onGuest();
+    } catch {
+      setMessage('Гостевой режим не запустился. Попробуй обновить страницу.');
     } finally {
       setBusy(false);
     }
@@ -68,8 +80,8 @@ export function Auth({ onGuest }: AuthProps) {
       >
         {mode === 'signin' ? 'Нет аккаунта? Зарегистрируйся' : 'Уже есть аккаунт? Войти'}
       </button>
-      <button className="guest-button" onClick={onGuest} type="button">
-        Войти как гость
+      <button className="guest-button" disabled={busy} onClick={handleGuest} type="button">
+        {busy ? '…' : 'Войти как гость'}
       </button>
     </section>
   );

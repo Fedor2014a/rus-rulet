@@ -16,9 +16,13 @@ type Boss = Rect & { id: string; name: string; amplitude: number; speed: number;
 type Projectile = Rect & { id: string; vx: number };
 type BossFireball = Rect & { id: string; vx: number; vy: number };
 export type GameProgress = { levelIndex: number; deaths: number };
+export type SavedGameProgress = GameProgress & {
+  playerHp?: { p1: number; p2: number };
+  arrows?: { p1: number; p2: number };
+};
 type TrapPlatformerGameProps = {
-  initialProgress?: GameProgress | null;
-  onProgressChange?: (progress: GameProgress) => void;
+  initialProgress?: SavedGameProgress | null;
+  onProgressChange?: (progress: SavedGameProgress) => void;
 };
 
 type Trigger =
@@ -73,8 +77,9 @@ const gravity = 0.75;
 const moveSpeed = 4.2;
 const jumpSpeed = 13.4;
 const maxArrowCount = 8;
+const levelMenuPageSize = 50;
 
-const totalLevelCount = 1000;
+export const totalLevelCount = 1000;
 
 function createScalingBoss(levelNumber: number, id: string, baseName: string, x: number, y: number): Boss {
   const tier = Math.min(10, Math.floor((levelNumber - 1) / 10) + 1);
@@ -304,7 +309,12 @@ function createBossHp(level: Level): Record<string, number> {
   return Object.fromEntries((level.bosses ?? []).map((boss) => [boss.id, boss.hp]));
 }
 
-function createState(levelIndex: number, deaths = 0, message = 'Победи босса мечом на F, потом иди в дверь.'): GameState {
+function clampStat(value: number | undefined, max: number) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return max;
+  return Math.max(0, Math.min(max, value));
+}
+
+function createState(levelIndex: number, deaths = 0, message = 'Победи босса мечом на F, потом иди в дверь.', saved?: SavedGameProgress | null): GameState {
   const level = levels[levelIndex];
   return {
     levelIndex,
@@ -315,11 +325,17 @@ function createState(levelIndex: number, deaths = 0, message = 'Победи б�
     revealed: [],
     disabled: [],
     pressedButtons: [],
-    playerHp: { p1: maxPlayerHp, p2: maxPlayerHp },
+    playerHp: {
+      p1: clampStat(saved?.playerHp?.p1, maxPlayerHp),
+      p2: clampStat(saved?.playerHp?.p2, maxPlayerHp),
+    },
     invulnerableUntil: { p1: 0, p2: 0 },
     bossHp: createBossHp(level),
     attackUntil: { p1: 0, p2: 0 },
-    arrows: { p1: maxArrowCount, p2: maxArrowCount },
+    arrows: {
+      p1: clampStat(saved?.arrows?.p1, maxArrowCount),
+      p2: clampStat(saved?.arrows?.p2, maxArrowCount),
+    },
     projectiles: [],
     bossShots: [],
     facing: { p1: 1, p2: 1 },
@@ -457,8 +473,11 @@ function damageBoss(bossHp: Record<string, number>, boss: Boss, damage: number) 
 
 export function TrapPlatformerGame({ initialProgress, onProgressChange }: TrapPlatformerGameProps) {
   const [game, setGame] = useState<GameState>(() =>
-    createState(Math.min(initialProgress?.levelIndex ?? 0, levels.length - 1), initialProgress?.deaths ?? 0),
+    createState(Math.min(initialProgress?.levelIndex ?? 0, levels.length - 1), initialProgress?.deaths ?? 0, undefined, initialProgress),
   );
+  const [levelInput, setLevelInput] = useState(String(Math.min(initialProgress?.levelIndex ?? 0, levels.length - 1) + 1));
+  const [levelMenuOpen, setLevelMenuOpen] = useState(false);
+  const [levelMenuPage, setLevelMenuPage] = useState(Math.floor(Math.min(initialProgress?.levelIndex ?? 0, levels.length - 1) / levelMenuPageSize));
   const controlsRef = useRef<ControlState>({
     p1: { left: false, right: false, jumpHeld: false, jumpQueued: 0, attackQueued: false, shootQueued: false },
     p2: { left: false, right: false, jumpHeld: false, jumpQueued: 0, attackQueued: false, shootQueued: false },
@@ -514,8 +533,13 @@ export function TrapPlatformerGame({ initialProgress, onProgressChange }: TrapPl
   }, []);
 
   useEffect(() => {
-    onProgressChange?.({ levelIndex: game.levelIndex, deaths: game.deaths });
-  }, [game.levelIndex, game.deaths, onProgressChange]);
+    onProgressChange?.({
+      levelIndex: game.levelIndex,
+      deaths: game.deaths,
+      playerHp: game.playerHp,
+      arrows: game.arrows,
+    });
+  }, [game.levelIndex, game.deaths, game.playerHp, game.arrows, onProgressChange]);
 
   function kill(state: GameState, text: string): GameState {
     return { ...createState(state.levelIndex, state.deaths + 1, text), revealed: state.revealed };
@@ -824,16 +848,54 @@ export function TrapPlatformerGame({ initialProgress, onProgressChange }: TrapPl
     setGame((current) => createState(current.levelIndex, current.deaths, 'Респавн. Уровень сделал вид, что ничего не было.'));
   }
 
+  function jumpToLevelIndex(levelIndex: number, message: string) {
+    const nextLevelIndex = Math.max(0, Math.min(levels.length - 1, levelIndex));
+    setLevelInput(String(nextLevelIndex + 1));
+    setLevelMenuPage(Math.floor(nextLevelIndex / levelMenuPageSize));
+    setGame((current) => createState(nextLevelIndex, current.deaths, message));
+  }
+
+  function goPreviousLevel() {
+    setGame((current) => {
+      if (current.levelIndex <= 0) return { ...current, message: 'Это первый уровень. Ниже только меню и воспоминания.' };
+      const nextLevelIndex = current.levelIndex - 1;
+      setLevelInput(String(nextLevelIndex + 1));
+      setLevelMenuPage(Math.floor(nextLevelIndex / levelMenuPageSize));
+      return createState(nextLevelIndex, current.deaths, `Переход на уровень ${nextLevelIndex + 1}.`);
+    });
+  }
+
   function goNextLevel() {
     setGame((current) => {
       if (current.levelIndex >= levels.length - 1) return { ...current, message: 'Это последний уровень. Повторов больше не будет.' };
-      return createState(current.levelIndex + 1, current.deaths, 'Новая комната. Сомневайтесь в геометрии.');
+      const nextLevelIndex = current.levelIndex + 1;
+      setLevelInput(String(nextLevelIndex + 1));
+      setLevelMenuPage(Math.floor(nextLevelIndex / levelMenuPageSize));
+      return createState(nextLevelIndex, current.deaths, 'Новая комната. Сомневайтесь в геометрии.');
     });
+  }
+
+  function goToLevel() {
+    const levelNumber = Number.parseInt(levelInput, 10);
+    if (Number.isNaN(levelNumber)) {
+      setGame((current) => ({ ...current, message: 'Напиши номер уровня от 1 до 1000.' }));
+      return;
+    }
+
+    const nextLevelIndex = Math.max(0, Math.min(levels.length - 1, levelNumber - 1));
+    const nextLevelNumber = nextLevelIndex + 1;
+    jumpToLevelIndex(nextLevelIndex, `Переход на уровень ${nextLevelNumber}. Босс уже делает разминку.`);
   }
 
   const level = levels[game.levelIndex];
   const activeGates = useMemo(() => level.gates.filter((gate) => !game.pressedButtons.includes(gate.buttonId)), [game.pressedButtons, level.gates]);
   const activeBoss = (level.bosses ?? []).find((boss) => (game.bossHp[boss.id] ?? 0) > 0);
+  const levelMenuPageCount = Math.ceil(levels.length / levelMenuPageSize);
+  const levelMenuStart = levelMenuPage * levelMenuPageSize;
+  const visibleLevelIndexes = Array.from(
+    { length: Math.min(levelMenuPageSize, levels.length - levelMenuStart) },
+    (_, index) => levelMenuStart + index,
+  );
 
   return (
     <main className="trap-page">
@@ -938,7 +1000,27 @@ export function TrapPlatformerGame({ initialProgress, onProgressChange }: TrapPl
 
         <div className="trap-actions">
           <button onClick={restart} type="button">Заново</button>
+          <button className="secondary-action" onClick={() => setLevelMenuOpen((open) => !open)} type="button">
+            Уровни
+          </button>
+          <button className="secondary-action" onClick={goPreviousLevel} type="button">Назад</button>
           <button className="secondary-action" onClick={goNextLevel} type="button">Следующий</button>
+          <button onClick={() => jumpToLevelIndex(game.levelIndex - 10, 'Прыгнули на 10 уровней назад.')} type="button">-10</button>
+          <button onClick={() => jumpToLevelIndex(game.levelIndex + 10, 'Прыгнули на 10 уровней вперёд.')} type="button">+10</button>
+          <label className="level-jump">
+            <span>Уровень</span>
+            <input
+              min="1"
+              max={levels.length}
+              onChange={(event) => setLevelInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') goToLevel();
+              }}
+              type="number"
+              value={levelInput}
+            />
+          </label>
+          <button className="secondary-action" onClick={goToLevel} type="button">Перейти</button>
           <button onClick={() => hitBossNow('p1', 'мечом')} type="button">P1 удар</button>
           <button className="secondary-action" onClick={() => hitBossNow('p1', 'стрелой')} type="button">P1 стрела</button>
           <button onClick={() => hitBossNow('p2', 'мечом')} type="button">P2 удар</button>
@@ -952,6 +1034,54 @@ export function TrapPlatformerGame({ initialProgress, onProgressChange }: TrapPl
           </strong>
         </article>
       </section>
+
+      {levelMenuOpen && (
+        <section className="level-menu" aria-label="Меню уровней">
+          <div className="level-menu-head">
+            <article>
+              <span>Меню уровней</span>
+              <strong>
+                {levelMenuStart + 1}-{Math.min(levelMenuStart + levelMenuPageSize, levels.length)} из {levels.length}
+              </strong>
+            </article>
+            <div className="level-menu-pager">
+              <button
+                className="secondary-action"
+                disabled={levelMenuPage === 0}
+                onClick={() => setLevelMenuPage((page) => Math.max(0, page - 1))}
+                type="button"
+              >
+                -50
+              </button>
+              <button
+                className="secondary-action"
+                disabled={levelMenuPage >= levelMenuPageCount - 1}
+                onClick={() => setLevelMenuPage((page) => Math.min(levelMenuPageCount - 1, page + 1))}
+                type="button"
+              >
+                +50
+              </button>
+              <button onClick={() => setLevelMenuOpen(false)} type="button">Закрыть</button>
+            </div>
+          </div>
+
+          <div className="level-grid">
+            {visibleLevelIndexes.map((levelIndex) => (
+              <button
+                className={`level-tile ${levelIndex === game.levelIndex ? 'active' : ''}`}
+                key={levelIndex}
+                onClick={() => {
+                  jumpToLevelIndex(levelIndex, `Выбран уровень ${levelIndex + 1}.`);
+                  setLevelMenuOpen(false);
+                }}
+                type="button"
+              >
+                {levelIndex + 1}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }
